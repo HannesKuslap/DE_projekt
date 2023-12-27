@@ -1,4 +1,3 @@
-import neo4j
 from py2neo import Graph, Node, Relationship
 
 class Neo4jGraph:
@@ -36,7 +35,7 @@ def main():
     }
  
     # Create Neo4jGraph instance
-    neo4j_graph = Neo4jGraph(uri="bolt://localhost:7687", auth=("your_username", "your_password"))
+    neo4j_graph = Neo4jGraph(uri="bolt://localhost:7687", auth=("neo4j", "Lammas123"))
     
     # Process the data and create nodes and relationships
     author_names = arxiv_entry['authors'].split(', ')

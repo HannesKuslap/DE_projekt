@@ -29,3 +29,19 @@ Kuidas database tööle saada?
     vaadata andmeid.
 
 8.  Kui tahad töö ära lõpetada kirjuta terminali "docker compose down" ja kõik.
+
+Kuidas neo4j tööle saada?
+
+1. Ava neo4j desktop
+
+2. Loo uus projekt 
+
+3. Avanenud aknas vajuta Add ja lisa Local DBMS 
+
+4. Pane misiganes nimi, parooliks pane Lammas123 ja siis loo dbms
+
+5. Kui DBMS on loodud, pane hiir selle kohale ja vajuta Start
+
+6. Jooksuta neo4jdb.py ja see populeerib andmebaasi
+
+7. Andmebaasi peatamiseks pane stop
