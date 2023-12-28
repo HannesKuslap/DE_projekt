@@ -1,0 +1,34 @@
+Commands for performing co-authorship prediction and community analysis.
+Requires Neo4j Graph Data Science
+
+CO-AUTHORSHIP PREDICTION
+find common co-authors:
+
+MATCH (author:Author {name: 'AuthorName'})
+-- Find articles written by the given author
+MATCH (author)-[:WRITTEN_BY]->(article)<-[:WRITTEN_BY]-(coAuthor)
+-- Exclude the given author from the results
+WHERE coAuthor <> author
+RETURN DISTINCT coAuthor.name AS coAuthorName
+
+get co-authorship score:
+
+MATCH (author:Author {name: 'Author1'})-[:WRITTEN_BY]->(article)<-[:WRITTEN_BY]-(coAuthor:Author)-[:WRITTEN_BY]->(otherArticle)
+RETURN coAuthor.name AS coAuthorName, COUNT(DISTINCT otherArticle) AS coAuthorshipScore
+ORDER BY coAuthorshipScore DESC
+
+COMMUNITY ANALYSIS
+detect communities using the Louvain algorithm:
+
+CALL algo.louvain(
+  'MATCH (a:Author)-[:WRITTEN_BY]->(ar:Article) RETURN id(a) as id, id(ar) as communityId',
+  'MATCH (a1:Author)-[:WRITTEN_BY]->(ar1:Article)<-[:REFERENCES]-(ar2:Article)<-[:WRITTEN_BY]-(a2:Author)
+   RETURN id(a1) as source, id(a2) as target, COUNT(DISTINCT ar1) + COUNT(DISTINCT ar2) as weight',
+  {graph: 'cypher', write: true, writeProperty: 'communityId'}
+)
+
+get authors names in a community:
+
+MATCH (author:Author)-[:WRITTEN_BY]->(article)<-[:WRITTEN_BY]-(coAuthor:Author)
+WHERE author.communityId = coAuthor.communityId
+RETURN DISTINCT coAuthor.name AS coAuthorName

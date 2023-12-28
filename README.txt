@@ -45,3 +45,6 @@ Kuidas neo4j tööle saada?
 6. Jooksuta neo4jdb.py ja see populeerib andmebaasi
 
 7. Andmebaasi peatamiseks pane stop
+
+Plugina installimiseks vajuta dbms-i peale kui see on peatunud -> vali vaheleht Plugins -> pane install
+Plugin rakendub ainult konkreetsele dbms-ile. Meil on community analüüsi ja co-authorshipi jaoks vaja Graph Data Science pluginat.
