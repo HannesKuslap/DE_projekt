@@ -30,10 +30,10 @@ arxiv_data_dag = DAG(
     default_args=DEFAULT_ARGS,  # args assigned to all operators
 )
 
-
+################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
 def connect_to_PostgreSQL():
     conn = psycopg2.connect(
-        host='192.168.10.19',
+        host='YOUR_IPV4_IP_HERE',
         user='airflow',
         password='airflow',
         database='airflow',
@@ -72,13 +72,14 @@ def insert_data(jsonfile, **kwargs):
     cur.close()
     conn.close()
 
-
+################################################ INSERT YOUR KAGGLE.JSON USERNAME AND PASSWORD HERE SO IT CAN DOWNLOAD
+################################################ THE DATASET AUTOMATICALLY
 ingest_data = BashOperator(
     task_id='ingest_data',
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
-    bash_command="pip install kaggle && export KAGGLE_USERNAME=raineich && export "
-                 "KAGGLE_KEY=704eb85bf13bcaceace994028646a3eb && kaggle datasets download -d "
+    bash_command="pip install kaggle && export KAGGLE_USERNAME=YOUR_KAGGLE_USERNAME_HERE && export "
+                 "KAGGLE_KEY=YOUR_KAGGLE_KEY_HERE && kaggle datasets download -d "
                  "'Cornell-University/arxiv' -p '/tmp/data'"
 )
 
