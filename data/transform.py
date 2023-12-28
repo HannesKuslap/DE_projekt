@@ -59,3 +59,5 @@ def transform_data(jsonfile):
 
     csv_file_path = jsonfile.split(".")[0] + '.csv'
     dataframe.to_csv(csv_file_path, index=False)
+
+    return csv_file_path # Kas siin peaks olema kaustaviide ka juures?
