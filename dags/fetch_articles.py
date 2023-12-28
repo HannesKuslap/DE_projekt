@@ -1,8 +1,8 @@
 import json
+import zipfile
+import psycopg2
 from datetime import datetime, timedelta
 from neo4jdb import Neo4jGraph
-
-import psycopg2
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
@@ -34,7 +34,7 @@ arxiv_data_dag = DAG(
 ################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
 def connect_to_PostgreSQL():
     conn = psycopg2.connect(
-        host='192.168.1.136',
+        host='192.168.10.19',
         user='airflow',
         password='airflow',
         database='airflow',
@@ -42,11 +42,15 @@ def connect_to_PostgreSQL():
     )
     return conn
 
+def unzip_file(zip_file_path, extract_to_path):
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_to_path)
 
 def insert_data(jsonfile, **kwargs):
+    unzip_file(f'/tmp/data/arxiv.zip', DATA_FOLDER)
     conn = connect_to_PostgreSQL()
-    cur = conn.cursor()
 
+    cur = conn.cursor()
     # Insert data into the table
     with open(jsonfile, 'r') as f:
         for line in f:
@@ -110,10 +114,12 @@ ingest_data = BashOperator(
     task_id='ingest_data',
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
-    bash_command="pip install kaggle && export KAGGLE_USERNAME=karlerikk && export "
-                 "KAGGLE_KEY=066a3046434375f98aa99de687292b61 && kaggle datasets download -d "
+    bash_command="pip install kaggle && export KAGGLE_USERNAME=raineich && export "
+                 "KAGGLE_KEY=8569c8d985ccc25ca167cb1248cceaea && kaggle datasets download -d "
                  "'Cornell-University/arxiv' -p '/tmp/data'"
 )
+
+
 
 create_articleTable = PostgresOperator(
     task_id='create_articleTable',
@@ -150,7 +156,7 @@ populate_tables = PythonOperator(
     trigger_rule='none_failed',
     python_callable=insert_data,
     op_kwargs={
-        'jsonfile': DATA_FOLDER + "/arxiv-metadata-oai-snapshot.json"
+        'jsonfile': DATA_FOLDER+'/arxiv-metadata-oai-snapshot.json'
     }
 )
 
@@ -168,13 +174,15 @@ populate_graph = PythonOperator(
 
 create_authorTable >> populate_graph
 
-"""insert_to_db = PostgresOperator(
-    task_id='insert_to_db',
+populate_graph = PythonOperator(
+    task_id='populate_graph',
     dag=arxiv_data_dag,
-    postgres_conn_id='airflow_pg',
     trigger_rule='none_failed',
-    sql= ,
-    autocommit=True,
+    python_callable=insert_data,
+    op_kwargs={
+        'jsonfile': DATA_FOLDER + "/arxiv-metadata-oai-snapshot.json"
+    }
 )
 
-transform_data >> insert_to_db"""
+create_authorTable >> populate_graph
+
