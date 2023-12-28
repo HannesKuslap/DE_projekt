@@ -29,6 +29,15 @@ class Neo4jGraph:
         written_by = Relationship(author_node, "WRITTEN_BY", article_node)
         self.graph.create(written_by)
 
+    def create_references_relationships(self, source_node, references):
+        for target_doi in references:
+            self.graph.run(
+                "MATCH (source:Article {doi: $source_doi}), "
+                "(target:Article {doi: $target_doi}) "
+                "MERGE (source)-[:REFERENCES]->(target)",
+                source_doi=source_node['doi'], target_doi=target_doi
+            )
+
 def process_json_file(file_path, neo4j_graph):
     with open(file_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
@@ -43,6 +52,18 @@ def process_json_file(file_path, neo4j_graph):
         for author_node in author_nodes:
             neo4j_graph.create_written_by_relationship(author_node, article_node)
 
+    # Creating reference links after all article nodes are in the database
+    # Json file shoud have field called "references":[doi, doi, doi]
+    for i in range(len(data)):
+        references = data[i].get('references')
+        if references:
+            article_node = neo4j_graph.graph.run(
+                "MATCH (a:Article {doi: $doi}) RETURN a",
+                doi=data[i]['doi']
+            ).evaluate()
+
+            neo4j_graph.create_references_relationships(article_node, references)
+
 def main():
     data_folder = 'data'
 
@@ -53,6 +74,7 @@ def main():
     for file_number in range(1, 2):
         file_path = os.path.join(data_folder, f'arxiv_subset_{file_number}.json')
         process_json_file(file_path, neo4j_graph)
+
 
 if __name__ == '__main__':
     main()
