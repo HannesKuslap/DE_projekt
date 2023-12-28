@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta
+from neo4jdb import Neo4jGraph
 
 import psycopg2
 from airflow import DAG
@@ -33,7 +34,7 @@ arxiv_data_dag = DAG(
 ################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
 def connect_to_PostgreSQL():
     conn = psycopg2.connect(
-        host='YOUR_IPV4_IP_HERE',
+        host='192.168.1.136',
         user='airflow',
         password='airflow',
         database='airflow',
@@ -72,14 +73,45 @@ def insert_data(jsonfile, **kwargs):
     cur.close()
     conn.close()
 
+def insert_to_graph(jsonfile, **kwargs):
+    # Instantiate Neo4jGraph
+    neo4j_graph = Neo4jGraph(uri="bolt://localhost:7687", auth=("neo4j", "Lammas123"))
+
+    with open(jsonfile, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+
+    # Process the data and create nodes and relationships
+    for i in range(len(data)):
+        author_names = data[i]['authors_parsed']
+        author_nodes = [neo4j_graph.create_author_node(name) for name in author_names]
+
+        article_node = neo4j_graph.create_article_node(data[i])
+
+        for author_node in author_nodes:
+            neo4j_graph.create_written_by_relationship(author_node, article_node)
+
+    # Creating reference links after all article nodes are in the database
+    # Json file shoud have field called "references":[doi, doi, doi]
+    #for i in range(len(data)):
+        #references = data[i].get('references')
+        #if references:
+            #article_node = neo4j_graph.graph.run(
+                #"MATCH (a:Article {doi: $doi}) RETURN a",
+                #doi=data[i]['doi']
+            #).evaluate()
+
+            #neo4j_graph.create_references_relationships(article_node, references)
+
+            
+
 ################################################ INSERT YOUR KAGGLE.JSON USERNAME AND PASSWORD HERE SO IT CAN DOWNLOAD
 ################################################ THE DATASET AUTOMATICALLY
 ingest_data = BashOperator(
     task_id='ingest_data',
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
-    bash_command="pip install kaggle && export KAGGLE_USERNAME=YOUR_KAGGLE_USERNAME_HERE && export "
-                 "KAGGLE_KEY=YOUR_KAGGLE_KEY_HERE && kaggle datasets download -d "
+    bash_command="pip install kaggle && export KAGGLE_USERNAME=karlerikk && export "
+                 "KAGGLE_KEY=066a3046434375f98aa99de687292b61 && kaggle datasets download -d "
                  "'Cornell-University/arxiv' -p '/tmp/data'"
 )
 
@@ -123,6 +155,18 @@ populate_tables = PythonOperator(
 )
 
 create_authorTable >> populate_tables
+
+populate_graph = PythonOperator(
+    task_id='populate_graph',
+    dag=arxiv_data_dag,
+    trigger_rule='none_failed',
+    python_callable=insert_data,
+    op_kwargs={
+        'jsonfile': DATA_FOLDER + "/arxiv-metadata-oai-snapshot.json"
+    }
+)
+
+create_authorTable >> populate_graph
 
 """insert_to_db = PostgresOperator(
     task_id='insert_to_db',
