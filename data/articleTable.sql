@@ -2,10 +2,8 @@ CREATE TABLE IF NOT EXISTS article
 (
     article_id      SERIAL PRIMARY KEY,
     title           TEXT,
-    comments        TEXT,
     journal_ref     TEXT,
     doi             TEXT,
-    report_no       TEXT,
-    categories      TEXT,
-    license         TEXT
+    journal_id INTEGER REFERENCES journal(journal_id),
+    license_id INTEGER REFERENCES license(license_id)
 );

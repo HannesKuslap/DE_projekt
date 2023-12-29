@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import psycopg2
 import glob
 from psycopg2 import sql
@@ -93,6 +94,101 @@ def insert_data(**kwargs):
 
     # Create a cursor
     with conn.cursor() as cur:
+        # Insert data into the tables
+        with open(jsonfile, encoding="UTF8") as f:
+            for data in f:
+                for one_article in json.loads(data):
+
+                    # Insert into the article table
+                    insert_article_query = sql.SQL(
+                        'INSERT INTO article (title, publication_date, doi) '
+                        'VALUES (%s, %s, %s) RETURNING article_id'
+                    )
+
+                    # Execute the query and get the article_id
+                    cur.execute(insert_article_query, (
+                        one_article['title'], one_article['updated_date'],
+                        one_article['doi'],
+                    ))
+                    article_id = cur.fetchone()[0]
+
+                    # Insert into the author table and link to the article
+                    for author in one_article['authors_parsed']:
+                        insert_author_query = sql.SQL(
+                            'INSERT INTO author (first_name, last_name, middle_name) '
+                            'VALUES (%s, %s, %s) RETURNING author_id'
+                        )
+
+                        # Execute the query and get the author_id
+                        cur.execute(insert_author_query, (author[1], author[0], author[2],))
+                        author_id = cur.fetchone()[0]
+
+                        # Link the author to the article
+                        cur.execute('INSERT INTO article_authors (author_id, article_id) VALUES (%s, %s)',
+                                    (author_id, article_id))
+
+                    # Insert into the journal table
+                    insert_journal_query = sql.SQL(
+                        'INSERT INTO journal (journal_name) '
+                        'VALUES (%s) RETURNING journal_id'
+                    )
+
+                    # Execute the query and get the journal_id
+                    cur.execute(insert_journal_query, (
+                        re.split(r'[:,]',one_article['journal-ref'])[0],
+                    ))
+                    journal_id = cur.fetchone()[0]
+
+                    # Link the article to the journal
+                    cur.execute('UPDATE article SET journal_id = %s WHERE article_id = %s', (journal_id, article_id))
+
+                    # Insert into the license table
+                    insert_license_query = sql.SQL(
+                        'INSERT INTO license (license_type) VALUES (%s) RETURNING license_id'
+                    )
+
+                    # Execute the query and get the license_id
+                    cur.execute(insert_license_query, (one_article['license'],))
+                    license_id = cur.fetchone()[0]
+
+                    # Link the article to the license
+                    cur.execute('UPDATE article SET license_id = %s WHERE article_id = %s', (license_id, article_id))
+
+                    # Insert into the categories table
+                    for categories in one_article['categories']:
+                        for category in categories:
+                            insert_category_query = sql.SQL(
+                                'INSERT INTO categories (category_name) VALUES (%s) RETURNING category_id'
+                            )
+
+                            # Execute the query and get the category_id
+                            cur.execute(insert_category_query, (category,))
+                            category_id = cur.fetchone()[0]
+
+                            # Link the article to the category
+                            cur.execute('INSERT INTO article_categories (article_id, category_id) VALUES (%s, %s)',
+                                        (article_id, category_id))
+
+
+        # Commit the transaction
+        conn.commit()
+
+    # Close the connection
+    conn.close()
+
+
+
+
+"""""
+def insert_data(**kwargs):
+    # Use XCom to get the latest file from the 'new_files' task
+    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
+
+    # Establish a connection to PostgreSQL
+    conn = connect_to_PostgreSQL()
+
+    # Create a cursor
+    with conn.cursor() as cur:
         # Insert data into the table
         with open(jsonfile, encoding="UTF8") as f:
             for data in f:
@@ -131,52 +227,6 @@ def insert_data(**kwargs):
 
     # Close the connection
     conn.close()
-
-"""""
-def insert_data(**kwargs):
-    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
-
-    conn = connect_to_PostgreSQL()
-    cur = conn.cursor()
-
-    try:
-        # Insert data into the table
-        with open(jsonfile, encoding="UTF8") as f:
-            for data in f:
-                for one_article in json.loads(data):
-                    cur.execute(
-                        'INSERT INTO article (title, comments, journal_ref, doi, report_no, categories, license) VALUES (%s, %s, %s, %s, %s, %s, %s)',
-                        (
-                            one_article['title'], one_article['comments'], one_article['journal-ref'],
-                            one_article['doi'], one_article['report-no'], one_article['categories'],
-                            one_article['license'],
-                        ))
-
-                    cur.execute('SELECT LASTVAL()')
-                    article_id = cur.fetchone()[0]
-
-                    for author in one_article['authors_parsed']:
-                        cur.execute('INSERT INTO author (first_name, last_name, middle_name) VALUES (%s, %s, %s)',
-                                    (author[1], author[0], author[2],))
-                        cur.execute('SELECT LASTVAL()')
-                        author_id = cur.fetchone()[0]
-
-                        if article_id is not None and author_id is not None:
-                            cur.execute('INSERT INTO article_authors (author_id, article_id) VALUES (%s, %s)',
-                                        (author_id, article_id))
-
-        # Commit changes after processing each article
-        conn.commit()
-
-    except Exception as e:
-        # Handle exceptions, log or raise as needed
-        print(f"Error: {e}")
-        conn.rollback()
-
-    finally:
-        # Close the connections in the 'finally' block to ensure it happens regardless of exceptions
-        cur.close()
-        conn.close()
 """""
 
 def insert_to_graph(**kwargs):
@@ -223,6 +273,30 @@ create_articleTable = SQLExecuteQueryOperator(
     sql='articleTable.sql',
     autocommit=True
 )
+create_categoriesTable = SQLExecuteQueryOperator(
+    task_id='create_categoriesTable',
+    dag=arxiv_data_dag,
+    trigger_rule='none_failed',
+    conn_id='airflow_pg',
+    sql='categoriesTable.sql',
+    autocommit=True
+)
+create_journalTable = SQLExecuteQueryOperator(
+    task_id='create_journalTable',
+    dag=arxiv_data_dag,
+    trigger_rule='none_failed',
+    conn_id='airflow_pg',
+    sql='journalTable.sql',
+    autocommit=True
+)
+create_licenseTable = SQLExecuteQueryOperator(
+    task_id='create_licenseTable',
+    dag=arxiv_data_dag,
+    trigger_rule='none_failed',
+    conn_id='airflow_pg',
+    sql='licenseTable.sql',
+    autocommit=True
+)
 
 create_authorTable = SQLExecuteQueryOperator(
     task_id='create_authorTable',
@@ -242,6 +316,15 @@ create_articleAuthorTable = SQLExecuteQueryOperator(
     autocommit=True
 )
 
+create_articleCategoriesTable = SQLExecuteQueryOperator(
+    task_id='create_articleCategoriesTable',
+    dag=arxiv_data_dag,
+    trigger_rule='none_failed',
+    conn_id='airflow_pg',
+    sql='articleCategoriesTable.sql',
+    autocommit=True
+)
+
 sense_file = FileSensor(
     task_id="wait_for_file",
     dag=arxiv_data_dag,
@@ -251,7 +334,8 @@ sense_file = FileSensor(
     timeout=300
 )
 
-start >> [create_articleTable, create_authorTable, create_articleAuthorTable] >> sense_file
+(start >> [create_articleTable, create_authorTable, create_journalTable, create_licenseTable, create_categoriesTable]
+ [create_articleAuthorTable, create_articleCategoriesTable] >> sense_file)
 
 new_files = PythonOperator(
     task_id="new_files",
