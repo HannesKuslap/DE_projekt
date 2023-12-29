@@ -3,6 +3,7 @@ import os
 import re
 import psycopg2
 import glob
+# from crossref.restful import Works
 from psycopg2 import sql
 from datetime import datetime, timedelta
 from airflow.sensors.filesystem import FileSensor
@@ -58,7 +59,7 @@ def update_existing_files(new_file):
         file.write(new_file + '\n')
 
 
-def get_latest_file(**kwargs):
+def get_latest_file():
     list_of_files = glob.glob(DATA_FOLDER + '/*.json')
     latest_file = max(list_of_files, key=os.path.getctime)
     return latest_file
@@ -74,6 +75,18 @@ def check_if_file_is_new(**kwargs):
         kwargs['ti'].xcom_push(key='latest_file', value=file_to_check)
 
 
+"""""
+def request_crossrefapi(doi):
+    works = Works()
+    try:
+        response = [works.doi(doi).get(k) for k in ['is-referenced-by-count', 'subject', 'type', 'publisher']]
+    except:
+        response = None
+
+    return response
+"""""
+
+
 ################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
 def connect_to_PostgreSQL():
     conn = psycopg2.connect(
@@ -84,6 +97,7 @@ def connect_to_PostgreSQL():
         port='5432'
     )
     return conn
+
 
 def insert_data(**kwargs):
     # Use XCom to get the latest file from the 'new_files' task
@@ -107,7 +121,7 @@ def insert_data(**kwargs):
 
                     # Execute the query and get the article_id
                     cur.execute(insert_article_query, (
-                        one_article['title'], one_article['updated_date'],
+                        one_article['title'], one_article['update_date'],
                         one_article['doi'],
                     ))
                     article_id = cur.fetchone()[0]
@@ -135,7 +149,7 @@ def insert_data(**kwargs):
 
                     # Execute the query and get the journal_id
                     cur.execute(insert_journal_query, (
-                        re.split(r'[:,]',one_article['journal-ref'])[0],
+                        re.split(r'[:,]', str(one_article['journal-ref']))[0],
                     ))
                     journal_id = cur.fetchone()[0]
 
@@ -155,7 +169,7 @@ def insert_data(**kwargs):
                     cur.execute('UPDATE article SET license_id = %s WHERE article_id = %s', (license_id, article_id))
 
                     # Insert into the categories table
-                    for categories in one_article['categories']:
+                    for categories in one_article['categories'].split(" "):
                         for category in categories:
                             insert_category_query = sql.SQL(
                                 'INSERT INTO categories (category_name) VALUES (%s) RETURNING category_id'
@@ -169,14 +183,11 @@ def insert_data(**kwargs):
                             cur.execute('INSERT INTO article_categories (article_id, category_id) VALUES (%s, %s)',
                                         (article_id, category_id))
 
-
         # Commit the transaction
         conn.commit()
 
     # Close the connection
     conn.close()
-
-
 
 
 """""
@@ -228,6 +239,7 @@ def insert_data(**kwargs):
     # Close the connection
     conn.close()
 """""
+
 
 def insert_to_graph(**kwargs):
     jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
@@ -334,8 +346,13 @@ sense_file = FileSensor(
     timeout=300
 )
 
-(start >> [create_articleTable, create_authorTable, create_journalTable, create_licenseTable, create_categoriesTable]
- [create_articleAuthorTable, create_articleCategoriesTable] >> sense_file)
+create_bridgeTables = EmptyOperator(
+    task_id="create_bridgeTables",
+    dag=arxiv_data_dag
+)
+
+start >> [create_authorTable, create_journalTable, create_licenseTable, create_categoriesTable] >> create_bridgeTables
+create_bridgeTables >> [create_articleTable, create_articleAuthorTable, create_articleCategoriesTable] >> sense_file
 
 new_files = PythonOperator(
     task_id="new_files",
