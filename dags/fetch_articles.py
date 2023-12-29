@@ -278,11 +278,11 @@ populate_graph = PythonOperator(
     task_id=f'populate_graph',
     dag=arxiv_data_dag,
     trigger_rule='all_done',
-    python_callable=insert_data
+    python_callable=insert_to_graph
 )
 sense_file >> new_files >> ingest_file
 
-ingest_file >>  populate_tables >> populate_graph
+ingest_file >>  populate_graph
 
 """""
 create_articleAuthorTable >> start_tasks
