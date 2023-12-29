@@ -37,6 +37,34 @@ class Neo4jGraph:
                 "MERGE (source)-[:REFERENCES]->(target)",
                 source_doi=source_node['doi'], target_doi=target_doi
             )
+    
+    def get_coauthors(self, author_name):
+        query = (
+            f"MATCH (author:Author {{name: '{author_name}'}})"
+            "MATCH (author)-[:WRITTEN_BY]->(article)<-[:WRITTEN_BY]-(coAuthor)"
+            "WHERE coAuthor <> author"
+            "RETURN DISTINCT coAuthor.name AS coAuthorName"
+        )
+        return self.graph.run(query).data()
+
+    def calculate_coauthorship_score(self, author_name):
+        query = (
+            f"MATCH (author:Author {{name: '{author_name}'}})-[:WRITTEN_BY]->(article)<-[:WRITTEN_BY]-(coAuthor:Author)-[:WRITTEN_BY]->(otherArticle)"
+            "RETURN coAuthor.name AS coAuthorName, COUNT(DISTINCT otherArticle) AS coAuthorshipScore"
+            "ORDER BY coAuthorshipScore DESC"
+        )
+        return self.graph.run(query).data()
+
+    def community_analysis(self):
+        query = """
+        CALL algo.louvain(
+          'MATCH (a:Author)-[:WRITTEN_BY]->(ar:Article) RETURN id(a) as id, id(ar) as communityId',
+          'MATCH (a1:Author)-[:WRITTEN_BY]->(ar1:Article)<-[:REFERENCES]-(ar2:Article)<-[:WRITTEN_BY]-(a2:Author)
+           RETURN id(a1) as source, id(a2) as target, COUNT(DISTINCT ar1) + COUNT(DISTINCT ar2) as weight',
+          {graph: 'cypher', write: true, writeProperty: 'communityId'}
+        )
+        """
+        self.graph.run(query)
 
 def process_json_file(file_path, neo4j_graph):
     with open(file_path, 'r', encoding='utf-8') as file:
