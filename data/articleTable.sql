@@ -1,7 +1,6 @@
 CREATE TABLE IF NOT EXISTS article
 (
     article_id      SERIAL PRIMARY KEY,
-    submitter       TEXT,
     title           TEXT,
     comments        TEXT,
     journal_ref     TEXT,

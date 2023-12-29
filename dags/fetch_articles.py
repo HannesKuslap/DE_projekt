@@ -2,7 +2,7 @@ import json
 import os
 import psycopg2
 import glob
-
+from psycopg2 import sql
 from datetime import datetime, timedelta
 from airflow.sensors.filesystem import FileSensor
 from neo4jdb import Neo4jGraph
@@ -29,10 +29,12 @@ arxiv_data_dag = DAG(
     default_args=DEFAULT_ARGS,  # args assigned to all operators
 )
 
+
 def get_jsons_in_folder(folder_path, file_extension):
     all_files = os.listdir(folder_path)
     selected_files = [file for file in all_files if file.endswith(file_extension)]
     return selected_files
+
 
 def get_existing_files():
     """
@@ -45,6 +47,8 @@ def get_existing_files():
             existing_files = set(file.read().splitlines())
 
     return existing_files
+
+
 def update_existing_files(new_file):
     """
     Update the list of existing files in the text file.
@@ -52,22 +56,22 @@ def update_existing_files(new_file):
     with open(f"{DATA_FOLDER}/fileList.txt", 'a') as file:
         file.write(new_file + '\n')
 
+
 def get_latest_file(**kwargs):
     list_of_files = glob.glob(DATA_FOLDER + '/*.json')
-    latest_file=max(list_of_files, key=os.path.getctime)
-    print(latest_file)
+    latest_file = max(list_of_files, key=os.path.getctime)
     return latest_file
 
+
 def check_if_file_is_new(**kwargs):
-    file_to_check =get_latest_file()
+    file_to_check = get_latest_file()
     existing_files = get_existing_files()
-    print(existing_files)
-    print(file_to_check)
     if file_to_check in existing_files:
         raise ValueError('File not parsed completely/correctly')
     else:
         update_existing_files(file_to_check)
         kwargs['ti'].xcom_push(key='latest_file', value=file_to_check)
+
 
 ################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
 def connect_to_PostgreSQL():
@@ -81,36 +85,99 @@ def connect_to_PostgreSQL():
     return conn
 
 def insert_data(**kwargs):
-    jsonfile=kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
+    # Use XCom to get the latest file from the 'new_files' task
+    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
+
+    # Establish a connection to PostgreSQL
+    conn = connect_to_PostgreSQL()
+
+    # Create a cursor
+    with conn.cursor() as cur:
+        # Insert data into the table
+        with open(jsonfile, encoding="UTF8") as f:
+            for data in f:
+                for one_article in json.loads(data):
+
+                    # Use psycopg2.sql.SQL to safely format SQL queries
+                    insert_article_query = sql.SQL(
+                        'INSERT INTO article (title, comments, journal_ref, doi, report_no, categories, license) '
+                        'VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING article_id'
+                    )
+
+                    # Execute the query and get the article_id
+                    cur.execute(insert_article_query, (
+                        one_article['title'], one_article['comments'], one_article['journal-ref'],
+                        one_article['doi'], one_article['report-no'], one_article['categories'],
+                        one_article['license'],
+                    ))
+                    article_id = cur.fetchone()[0]
+
+                    # Insert authors and link them to the article
+                    for author in one_article['authors_parsed']:
+                        insert_author_query = sql.SQL(
+                            'INSERT INTO author (first_name, last_name, middle_name) VALUES (%s, %s, %s) RETURNING author_id'
+                        )
+
+                        # Execute the query and get the author_id
+                        cur.execute(insert_author_query, (author[1], author[0], author[2],))
+                        author_id = cur.fetchone()[0]
+
+                        # Link the author to the article
+                        cur.execute('INSERT INTO article_authors (author_id, article_id) VALUES (%s, %s)',
+                                    (author_id, article_id))
+
+        # Commit the transaction
+        conn.commit()
+
+    # Close the connection
+    conn.close()
+
+"""""
+def insert_data(**kwargs):
+    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
 
     conn = connect_to_PostgreSQL()
     cur = conn.cursor()
 
-    # Insert data into the table
-    with open(jsonfile, encoding="UTF8") as f:
-        for data in f:
-            for one_article in json.loads(data):
+    try:
+        # Insert data into the table
+        with open(jsonfile, encoding="UTF8") as f:
+            for data in f:
+                for one_article in json.loads(data):
+                    cur.execute(
+                        'INSERT INTO article (title, comments, journal_ref, doi, report_no, categories, license) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                        (
+                            one_article['title'], one_article['comments'], one_article['journal-ref'],
+                            one_article['doi'], one_article['report-no'], one_article['categories'],
+                            one_article['license'],
+                        ))
 
-                cur.execute(
-                    'INSERT INTO article (submitter,title,comments,journal_ref,doi,report_no,categories,license) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)',
-                    (one_article['submitter'], one_article['title'], one_article['comments'], one_article['journal-ref'],
-                     one_article['doi'], one_article['report-no'], one_article['categories'], one_article['license'],))
-
-                cur.execute('SELECT LASTVAL()')
-                article_id = cur.fetchone()[0]
-                for author in one_article['authors_parsed']:
-                    cur.execute('INSERT INTO author (first_name, last_name, middle_name) VALUES (%s, %s, %s)',
-                                (author[0], author[1], author[2],))
                     cur.execute('SELECT LASTVAL()')
-                    author_id = cur.fetchone()[0]
-                    if article_id is not None and author_id is not None:
-                        cur.execute('INSERT INTO article_authors (author_id, article_id) VALUES (%s, %s)',
-                                    (author_id, article_id))
-                conn.commit()
+                    article_id = cur.fetchone()[0]
 
-    # Close the connections
-    cur.close()
-    conn.close()
+                    for author in one_article['authors_parsed']:
+                        cur.execute('INSERT INTO author (first_name, last_name, middle_name) VALUES (%s, %s, %s)',
+                                    (author[1], author[0], author[2],))
+                        cur.execute('SELECT LASTVAL()')
+                        author_id = cur.fetchone()[0]
+
+                        if article_id is not None and author_id is not None:
+                            cur.execute('INSERT INTO article_authors (author_id, article_id) VALUES (%s, %s)',
+                                        (author_id, article_id))
+
+        # Commit changes after processing each article
+        conn.commit()
+
+    except Exception as e:
+        # Handle exceptions, log or raise as needed
+        print(f"Error: {e}")
+        conn.rollback()
+
+    finally:
+        # Close the connections in the 'finally' block to ensure it happens regardless of exceptions
+        cur.close()
+        conn.close()
+"""""
 
 def insert_to_graph(**kwargs):
     jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
@@ -132,15 +199,16 @@ def insert_to_graph(**kwargs):
 
     # Creating reference links after all article nodes are in the database
     # Json file shoud have field called "references":[doi, doi, doi]
-    #for i in range(len(data)):
-        #references = data[i].get('references')
-        #if references:
-            #article_node = neo4j_graph.graph.run(
-                #"MATCH (a:Article {doi: $doi}) RETURN a",
-                #doi=data[i]['doi']
-            #).evaluate()
+    # for i in range(len(data)):
+    # references = data[i].get('references')
+    # if references:
+    # article_node = neo4j_graph.graph.run(
+    # "MATCH (a:Article {doi: $doi}) RETURN a",
+    # doi=data[i]['doi']
+    # ).evaluate()
 
-            #neo4j_graph.create_references_relationships(article_node, references)
+    # neo4j_graph.create_references_relationships(article_node, references)
+
 
 start = EmptyOperator(
     task_id='start',
@@ -174,12 +242,12 @@ create_articleAuthorTable = SQLExecuteQueryOperator(
     autocommit=True
 )
 
-sense_file= FileSensor(
+sense_file = FileSensor(
     task_id="wait_for_file",
     dag=arxiv_data_dag,
     fs_conn_id="airflow_pg",
     filepath="/tmp/data/*.json",
-    poke_interval=60*1,
+    poke_interval=60 * 1,
     timeout=300
 )
 
@@ -188,7 +256,7 @@ start >> [create_articleTable, create_authorTable, create_articleAuthorTable] >>
 new_files = PythonOperator(
     task_id="new_files",
     dag=arxiv_data_dag,
-    python_callable= check_if_file_is_new,
+    python_callable=check_if_file_is_new,
     trigger_rule='none_failed'
 )
 
@@ -204,15 +272,15 @@ populate_tables = PythonOperator(
     dag=arxiv_data_dag,
     trigger_rule='all_done',
     python_callable=insert_data
-    )
+)
 
 populate_graph = PythonOperator(
     task_id=f'populate_graph',
     dag=arxiv_data_dag,
     trigger_rule='all_done',
     python_callable=insert_data
-    )
-sense_file  >> new_files >>ingest_file
+)
+sense_file >> new_files >> ingest_file
 
 ingest_file >> populate_tables >> populate_graph
 
