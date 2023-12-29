@@ -8,6 +8,5 @@ CREATE TABLE IF NOT EXISTS article
     doi             TEXT,
     report_no       TEXT,
     categories      TEXT,
-    license         TEXT,
-    abstract        TEXT
+    license         TEXT
 );
