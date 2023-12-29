@@ -76,7 +76,7 @@ def check_if_file_is_new(**kwargs):
 ################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
 def connect_to_PostgreSQL():
     conn = psycopg2.connect(
-        host='192.168.10.19',
+        host='192.168.1.136',
         user='airflow',
         password='airflow',
         database='airflow',
@@ -182,7 +182,7 @@ def insert_data(**kwargs):
 def insert_to_graph(**kwargs):
     jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
     # Instantiate Neo4jGraph
-    neo4j_graph = Neo4jGraph(uri="bolt://localhost:7687", auth=("neo4j", "Lammas123"))
+    neo4j_graph = Neo4jGraph(uri="bolt://host.docker.internal:7687", auth=("neo4j", "Lammas123"))
 
     with open(jsonfile, 'r', encoding='utf-8') as file:
         data = json.load(file)
@@ -282,7 +282,7 @@ populate_graph = PythonOperator(
 )
 sense_file >> new_files >> ingest_file
 
-ingest_file >> populate_tables >> populate_graph
+ingest_file >>  populate_tables >> populate_graph
 
 """""
 create_articleAuthorTable >> start_tasks
