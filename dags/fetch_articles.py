@@ -34,7 +34,7 @@ arxiv_data_dag = DAG(
 ################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
 def connect_to_PostgreSQL():
     conn = psycopg2.connect(
-        host='192.168.10.19',
+        host='192.168.1.136',
         user='airflow',
         password='airflow',
         database='airflow',
@@ -114,8 +114,8 @@ ingest_data = BashOperator(
     task_id='ingest_data',
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
-    bash_command="pip install kaggle && export KAGGLE_USERNAME=raineich && export "
-                 "KAGGLE_KEY=8569c8d985ccc25ca167cb1248cceaea && kaggle datasets download -d "
+    bash_command="pip install kaggle && export KAGGLE_USERNAME=karlerikk && export "
+                 "KAGGLE_KEY=066a3046434375f98aa99de687292b61 && kaggle datasets download -d "
                  "'Cornell-University/arxiv' -p '/tmp/data'"
 )
 
@@ -173,16 +173,3 @@ populate_graph = PythonOperator(
 )
 
 create_authorTable >> populate_graph
-
-populate_graph = PythonOperator(
-    task_id='populate_graph',
-    dag=arxiv_data_dag,
-    trigger_rule='none_failed',
-    python_callable=insert_data,
-    op_kwargs={
-        'jsonfile': DATA_FOLDER + "/arxiv-metadata-oai-snapshot.json"
-    }
-)
-
-create_authorTable >> populate_graph
-
