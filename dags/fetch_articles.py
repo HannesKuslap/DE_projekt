@@ -144,17 +144,22 @@ def insert_data(**kwargs):
                     # Insert into the journal table
                     insert_journal_query = sql.SQL(
                         'INSERT INTO journal (journal_name) '
-                        'VALUES (%s) RETURNING journal_id'
+                        'VALUES (%s) ON CONFLICT (journal_name) DO NOTHING RETURNING journal_id'
                     )
-
+                    category = re.split(r'[:,]', str(one_article['journal-ref']))[0]
                     # Execute the query and get the journal_id
-                    cur.execute(insert_journal_query, (
-                        re.split(r'[:,]', str(one_article['journal-ref']))[0],
-                    ))
-                    journal_id = cur.fetchone()[0]
+                    cur.execute(insert_journal_query, (category,))
+                    journal_id = cur.fetchone()[0] if cur.rowcount > 0 else None
+
+                    if journal_id is None:
+                        cur.execute('SELECT journal_id FROM journal WHERE journal_name = %s',
+                                    (category,))
+                        journal_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
                     # Link the article to the journal
-                    cur.execute('UPDATE article SET journal_id = %s WHERE article_id = %s', (journal_id, article_id))
+                    if journal_id is not None:
+                        cur.execute('UPDATE article SET journal_id = %s WHERE article_id = %s',
+                                    (journal_id, article_id))
 
                     # Insert into the license table
                     insert_license_query = sql.SQL(
@@ -167,8 +172,8 @@ def insert_data(**kwargs):
                     license_id = cur.fetchone()[0] if cur.rowcount >0 else None
 
                     if license_id is None:
-                        # Category already exists, fetch the existing category_id
-                        cur.execute('SELECT license_id FROM categories WHERE license_type = %s', (one_article['license'],))
+                        # License already exists, fetch the existing license_id
+                        cur.execute('SELECT license_id FROM license WHERE license_type = %s', (one_article['license'],))
                         license_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
                     # Link the article to the license
@@ -202,57 +207,6 @@ def insert_data(**kwargs):
 
     # Close the connection
     conn.close()
-
-
-"""""
-def insert_data(**kwargs):
-    # Use XCom to get the latest file from the 'new_files' task
-    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
-
-    # Establish a connection to PostgreSQL
-    conn = connect_to_PostgreSQL()
-
-    # Create a cursor
-    with conn.cursor() as cur:
-        # Insert data into the table
-        with open(jsonfile, encoding="UTF8") as f:
-            for data in f:
-                for one_article in json.loads(data):
-
-                    # Use psycopg2.sql.SQL to safely format SQL queries
-                    insert_article_query = sql.SQL(
-                        'INSERT INTO article (title, comments, journal_ref, doi, report_no, categories, license) '
-                        'VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING article_id'
-                    )
-
-                    # Execute the query and get the article_id
-                    cur.execute(insert_article_query, (
-                        one_article['title'], one_article['comments'], one_article['journal-ref'],
-                        one_article['doi'], one_article['report-no'], one_article['categories'],
-                        one_article['license'],
-                    ))
-                    article_id = cur.fetchone()[0]
-
-                    # Insert authors and link them to the article
-                    for author in one_article['authors_parsed']:
-                        insert_author_query = sql.SQL(
-                            'INSERT INTO author (first_name, last_name, middle_name) VALUES (%s, %s, %s) RETURNING author_id'
-                        )
-
-                        # Execute the query and get the author_id
-                        cur.execute(insert_author_query, (author[1], author[0], author[2],))
-                        author_id = cur.fetchone()[0]
-
-                        # Link the author to the article
-                        cur.execute('INSERT INTO article_authors (author_id, article_id) VALUES (%s, %s)',
-                                    (author_id, article_id))
-
-        # Commit the transaction
-        conn.commit()
-
-    # Close the connection
-    conn.close()
-"""""
 
 
 def insert_to_graph(**kwargs):
@@ -394,41 +348,3 @@ sense_file >> new_files >> ingest_file
 
 ingest_file >> populate_tables >> populate_graph
 
-"""""
-create_articleAuthorTable >> start_tasks
-
-file_list = get_jsons_in_folder(DATA_FOLDER, ".json")
-for file in file_list:
-    populate_tables = PythonOperator(
-        task_id=f'populate_tables_with_{file}',
-        dag=arxiv_data_dag,
-        trigger_rule='all_done',
-        provide_context=True,
-        python_callable=insert_data,
-        op_args=[DATA_FOLDER+"/"+file]
-    )
-
-    populate_graph = PythonOperator(
-        task_id=f'populate_graph_with_{file}',
-        dag=arxiv_data_dag,
-        trigger_rule='all_done',
-        provide_context=True,
-        python_callable=insert_data,
-        op_args=[DATA_FOLDER+"/"+file]
-    )
-
-    next_task = EmptyOperator(
-        task_id=f'next_task_{file}',
-        dag=arxiv_data_dag,
-        wait_for_downstream=True
-    )
-    start_tasks >> populate_tables>> populate_graph >> next_task
-
-
-final_task = PythonOperator(
-    task_id=f'finish_task',
-    python_callable=lambda:print("Final task is done"),
-    dag=arxiv_data_dag
-)
-next_task >> final_task
-"""""
