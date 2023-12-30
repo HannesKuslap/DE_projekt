@@ -15,3 +15,5 @@
 7.  Go to DAGs and run article_data DAG to start the pipeline
 
 8.  Open localhost:7474 to open neo4j. Connection - choose bolt and use this url after it: host.docker.internal:7687, username - neo4j, password - Lammas123
+
+9.  To open pgadmin, type localhost:5050 into your browser. Email - admin@admin.com, password - root
