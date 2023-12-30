@@ -24,7 +24,7 @@ DATA_FOLDER = '/tmp/data'
 
 arxiv_data_dag = DAG(
     dag_id='article_data',  # name of dag
-    schedule_interval='* * * * *',  # execute once a minute
+    schedule_interval='*/10 * * * *',  # execute once every 10 minutes
     start_date=datetime(2022, 9, 14, 9, 15, 0),
     catchup=False,  # in case execution has been paused, should it execute everything in between
     template_searchpath=DATA_FOLDER,  # the PostgresOperator will look for files in this folder
@@ -169,19 +169,18 @@ def insert_data(**kwargs):
                     cur.execute('UPDATE article SET license_id = %s WHERE article_id = %s', (license_id, article_id))
 
                     # Insert into the categories table
-                    for categories in one_article['categories'].split(" "):
-                        for category in categories:
-                            insert_category_query = sql.SQL(
-                                'INSERT INTO categories (category_name) VALUES (%s) RETURNING category_id'
-                            )
+                    for category in one_article['categories'].split(" "):
+                        insert_category_query = sql.SQL(
+                            'INSERT INTO categories (category_name) VALUES (%s) RETURNING category_id'
+                        )
 
-                            # Execute the query and get the category_id
-                            cur.execute(insert_category_query, (category,))
-                            category_id = cur.fetchone()[0]
+                        # Execute the query and get the category_id
+                        cur.execute(insert_category_query, (category,))
+                        category_id = cur.fetchone()[0]
 
-                            # Link the article to the category
-                            cur.execute('INSERT INTO article_categories (article_id, category_id) VALUES (%s, %s)',
-                                        (article_id, category_id))
+                        # Link the article to the category
+                        cur.execute('INSERT INTO article_categories (article_id, category_id) VALUES (%s, %s)',
+                                    (article_id, category_id))
 
         # Commit the transaction
         conn.commit()
