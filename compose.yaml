@@ -300,5 +300,20 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  neo4j:
+    image: neo4j:latest
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=none
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4JLABS_PLUGINS=["apoc"]
+    volumes:
+      - ./neo4j/data:/data
+      - ./neo4j/plugins:/plugins
+      - ./dags:/import/opt/airflow/dags/
+
 volumes:
   postgres-db-volume:
