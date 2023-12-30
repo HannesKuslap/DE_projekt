@@ -1,9 +1,9 @@
 import json
 import os
-import re
+import gender_guesser.detector as gender
 import psycopg2
 import glob
-# from crossref.restful import Works
+from crossref.restful import Works
 from psycopg2 import sql
 from datetime import datetime, timedelta
 from airflow.sensors.filesystem import FileSensor
@@ -31,6 +31,10 @@ arxiv_data_dag = DAG(
     default_args=DEFAULT_ARGS,  # args assigned to all operators
 )
 
+def get_gender(firstname):
+    d = gender.Detector()
+    g = d.get_gender(firstname)
+    return g
 
 def get_jsons_in_folder(folder_path, file_extension):
     all_files = os.listdir(folder_path)
@@ -69,28 +73,26 @@ def check_if_file_is_new(**kwargs):
     file_to_check = get_latest_file()
     existing_files = get_existing_files()
     if file_to_check in existing_files:
-        raise ValueError('File not parsed completely/correctly')
+        raise ValueError('File not new')
     else:
         update_existing_files(file_to_check)
         kwargs['ti'].xcom_push(key='latest_file', value=file_to_check)
 
-
-"""""
 def request_crossrefapi(doi):
     works = Works()
-    try:
-        response = [works.doi(doi).get(k) for k in ['is-referenced-by-count', 'subject', 'type', 'publisher']]
-    except:
-        response = None
+    response = works.doi(doi)
+    if response is None:
+        response = {"is-referenced-by-count": 0, "publisher": ""}
 
     return response
+
+
 """""
-
-
-################################################ INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
+INSERT YOUR IPV4 IP HERE, IDK WHY BUT LOCALHOST DOESNT WORK
+"""""
 def connect_to_PostgreSQL():
     conn = psycopg2.connect(
-        host='192.168.1.136',
+        host='192.168.10.19',
         user='airflow',
         password='airflow',
         database='airflow',
@@ -101,8 +103,8 @@ def connect_to_PostgreSQL():
 
 def insert_data(**kwargs):
     # Use XCom to get the latest file from the 'new_files' task
-    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
-
+    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files_found', key="latest_file")
+    print(jsonfile)
     # Establish a connection to PostgreSQL
     conn = connect_to_PostgreSQL()
 
@@ -111,8 +113,9 @@ def insert_data(**kwargs):
         # Insert data into the tables
         with open(jsonfile, encoding="UTF8") as f:
             for data in f:
+                n=0
                 for one_article in json.loads(data):
-
+                    n+=1
                     # Insert into the article table
                     insert_article_query = sql.SQL(
                         'INSERT INTO article (title, publication_date, doi) '
@@ -126,15 +129,27 @@ def insert_data(**kwargs):
                     ))
                     article_id = cur.fetchone()[0]
 
+                    # Fetch "is-referenced-by-count" from CrossRef API, this is limited to 1000 articles
+                    # due to the api slowing down the pipeline too much
+                    if n<=1000:
+                        doi = one_article['doi']
+                        request_api = request_crossrefapi(doi)
+                        publisher = request_api['publisher']
+
+                    # Update the article table with "is-referenced-by-count"
+                    if request_api['is-referenced-by-count'] is not None and n <=1000:
+                        cur.execute('UPDATE article SET reference_by_count = %s WHERE article_id = %s',
+                                    (request_api['is-referenced-by-count'], article_id))
+
                     # Insert into the author table and link to the article
                     for author in one_article['authors_parsed']:
                         insert_author_query = sql.SQL(
-                            'INSERT INTO author (first_name, last_name, middle_name) '
-                            'VALUES (%s, %s, %s) RETURNING author_id'
+                            'INSERT INTO author (first_name, last_name, middle_name, gender) '
+                            'VALUES (%s, %s, %s, %s) RETURNING author_id'
                         )
-
+                        gender = get_gender(author[1])
                         # Execute the query and get the author_id
-                        cur.execute(insert_author_query, (author[1], author[0], author[2],))
+                        cur.execute(insert_author_query, (author[1], author[0], author[2], gender))
                         author_id = cur.fetchone()[0]
 
                         # Link the author to the article
@@ -143,23 +158,24 @@ def insert_data(**kwargs):
 
                     # Insert into the journal table
                     insert_journal_query = sql.SQL(
-                        'INSERT INTO journal (journal_name) '
-                        'VALUES (%s) ON CONFLICT (journal_name) DO NOTHING RETURNING journal_id'
+                        'INSERT INTO publisher (publisher_name) '
+                        'VALUES (%s) ON CONFLICT (publisher_name) DO NOTHING RETURNING publisher_id'
                     )
-                    category = re.split(r'[:,]', str(one_article['journal-ref']))[0]
-                    # Execute the query and get the journal_id
-                    cur.execute(insert_journal_query, (category,))
-                    journal_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
-                    if journal_id is None:
-                        cur.execute('SELECT journal_id FROM journal WHERE journal_name = %s',
+                    # Execute the query and get the journal_id
+                    if publisher is not None and n <=1000:
+                        cur.execute(insert_journal_query, (publisher,))
+                    publisher_id = cur.fetchone()[0] if cur.rowcount > 0 else None
+
+                    if publisher_id is None:
+                        cur.execute('SELECT publisher_id FROM publisher WHERE publisher_name = %s',
                                     (category,))
-                        journal_id = cur.fetchone()[0] if cur.rowcount > 0 else None
+                        publisher_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
                     # Link the article to the journal
-                    if journal_id is not None:
-                        cur.execute('UPDATE article SET journal_id = %s WHERE article_id = %s',
-                                    (journal_id, article_id))
+                    if publisher_id is not None:
+                        cur.execute('UPDATE article SET publisher_id = %s WHERE article_id = %s',
+                                    (publisher_id, article_id))
 
                     # Insert into the license table
                     insert_license_query = sql.SQL(
@@ -169,7 +185,7 @@ def insert_data(**kwargs):
 
                     # Execute the query and get the license_id
                     cur.execute(insert_license_query, (one_article['license'],))
-                    license_id = cur.fetchone()[0] if cur.rowcount >0 else None
+                    license_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
                     if license_id is None:
                         # License already exists, fetch the existing license_id
@@ -178,8 +194,8 @@ def insert_data(**kwargs):
 
                     # Link the article to the license
                     if license_id is not None:
-                        cur.execute('UPDATE article SET license_id = %s WHERE article_id = %s', (license_id, article_id))
-
+                        cur.execute('UPDATE article SET license_id = %s WHERE article_id = %s',
+                                    (license_id, article_id))
 
                     # Insert into the categories table
                     for category in one_article['categories'].split(" "):
@@ -192,8 +208,8 @@ def insert_data(**kwargs):
                         cur.execute(insert_category_query, (category,))
                         category_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
+                        # Category already exists, fetch the existing category_id
                         if category_id is None:
-                            # Category already exists, fetch the existing category_id
                             cur.execute('SELECT category_id FROM categories WHERE category_name = %s', (category,))
                             category_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
@@ -201,16 +217,15 @@ def insert_data(**kwargs):
                         if category_id is not None:
                             cur.execute('INSERT INTO article_categories (article_id, category_id) VALUES (%s, %s)',
                                         (article_id, category_id))
-
-        # Commit the transaction
-        conn.commit()
+                    # Commit the transaction
+                    conn.commit()
 
     # Close the connection
     conn.close()
 
 
 def insert_to_graph(**kwargs):
-    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files', key="latest_file")
+    jsonfile = kwargs['ti'].xcom_pull(task_ids='new_files_found', key="latest_file")
     # Instantiate Neo4jGraph
     neo4j_graph = Neo4jGraph(uri="bolt://host.docker.internal:7687", auth=("neo4j", "Lammas123"))
 
@@ -250,7 +265,7 @@ create_articleTable = SQLExecuteQueryOperator(
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
     conn_id='airflow_pg',
-    sql='articleTable.sql',
+    sql='/sql/articleTable.sql',
     autocommit=True
 )
 create_categoriesTable = SQLExecuteQueryOperator(
@@ -258,15 +273,15 @@ create_categoriesTable = SQLExecuteQueryOperator(
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
     conn_id='airflow_pg',
-    sql='categoriesTable.sql',
+    sql='/sql/categoriesTable.sql',
     autocommit=True
 )
-create_journalTable = SQLExecuteQueryOperator(
-    task_id='create_journalTable',
+create_publisherTable = SQLExecuteQueryOperator(
+    task_id='create_publisherTable',
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
     conn_id='airflow_pg',
-    sql='journalTable.sql',
+    sql='/sql/publisherTable.sql',
     autocommit=True
 )
 create_licenseTable = SQLExecuteQueryOperator(
@@ -274,7 +289,7 @@ create_licenseTable = SQLExecuteQueryOperator(
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
     conn_id='airflow_pg',
-    sql='licenseTable.sql',
+    sql='/sql/licenseTable.sql',
     autocommit=True
 )
 
@@ -283,7 +298,7 @@ create_authorTable = SQLExecuteQueryOperator(
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
     conn_id='airflow_pg',
-    sql='authorTable.sql',
+    sql='/sql/authorTable.sql',
     autocommit=True
 )
 
@@ -292,7 +307,7 @@ create_articleAuthorTable = SQLExecuteQueryOperator(
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
     conn_id='airflow_pg',
-    sql='authorArticleTable.sql',
+    sql='/sql/authorArticleTable.sql',
     autocommit=True
 )
 
@@ -301,7 +316,7 @@ create_articleCategoriesTable = SQLExecuteQueryOperator(
     dag=arxiv_data_dag,
     trigger_rule='none_failed',
     conn_id='airflow_pg',
-    sql='articleCategoriesTable.sql',
+    sql='/sql/articleCategoriesTable.sql',
     autocommit=True
 )
 
@@ -314,11 +329,8 @@ sense_file = FileSensor(
     timeout=300
 )
 
-start >> [create_authorTable, create_journalTable, create_licenseTable, create_categoriesTable] >> create_articleTable
-create_articleTable >> [create_articleAuthorTable, create_articleCategoriesTable] >> sense_file
-
-new_files = PythonOperator(
-    task_id="new_files",
+new_files_found = PythonOperator(
+    task_id="new_files_found",
     dag=arxiv_data_dag,
     python_callable=check_if_file_is_new,
     trigger_rule='none_failed'
@@ -341,10 +353,14 @@ populate_tables = PythonOperator(
 populate_graph = PythonOperator(
     task_id=f'populate_graph',
     dag=arxiv_data_dag,
-    trigger_rule='all_done',
+    trigger_rule='none_failed',
     python_callable=insert_to_graph
 )
-sense_file >> new_files >> ingest_file
 
-ingest_file >>  populate_graph
+start >> [create_authorTable, create_publisherTable, create_licenseTable, create_categoriesTable] >> create_articleTable
 
+create_articleTable >> [create_articleAuthorTable, create_articleCategoriesTable] >> sense_file
+
+sense_file >> new_files_found >> ingest_file
+
+ingest_file >> populate_tables >> populate_graph
