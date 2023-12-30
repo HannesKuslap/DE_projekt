@@ -1,6 +1,8 @@
 from py2neo import Graph, Node, Relationship
 import json
 import os
+import requests
+
 
 class Neo4jGraph:
     def __init__(self, uri, auth):
@@ -91,6 +93,23 @@ def process_json_file(file_path, neo4j_graph):
             ).evaluate()
 
             neo4j_graph.create_references_relationships(article_node, references)
+
+def get_citations(doi):
+    base_url = "https://api.crossref.org/works/"
+    url = f"{base_url}{doi}"
+    
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        if 'reference' in data['message']:
+            citations = data['message']['reference']
+            dois = [citation['DOI'] for citation in citations if 'DOI' in citation]
+            return dois
+        else:
+            return []
+    else:
+        print(f"Error: Unable to retrieve data. Status code: {response.status_code}")
+        return []
 
 def main():
     data_folder = 'data'

@@ -7,7 +7,7 @@ from crossref.restful import Works
 from psycopg2 import sql
 from datetime import datetime, timedelta
 from airflow.sensors.filesystem import FileSensor
-from neo4jdb import Neo4jGraph
+from neo4jdb import Neo4jGraph, get_citations
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
@@ -243,16 +243,15 @@ def insert_to_graph(**kwargs):
             neo4j_graph.create_written_by_relationship(author_node, article_node)
 
     # Creating reference links after all article nodes are in the database
-    # Json file shoud have field called "references":[doi, doi, doi]
-    # for i in range(len(data)):
-    # references = data[i].get('references')
-    # if references:
-    # article_node = neo4j_graph.graph.run(
-    # "MATCH (a:Article {doi: $doi}) RETURN a",
-    # doi=data[i]['doi']
-    # ).evaluate()
+    for i in range(len(data)):
+        references = get_citations(data[i]['doi'])
+        if references:
+            article_node = neo4j_graph.graph.run(
+            "MATCH (a:Article {doi: $doi}) RETURN a",
+            doi=data[i]['doi']
+        ).evaluate()
 
-    # neo4j_graph.create_references_relationships(article_node, references)
+        neo4j_graph.create_references_relationships(article_node, references)
 
 
 start = EmptyOperator(

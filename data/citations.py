@@ -11,7 +11,8 @@ def get_citations(doi):
         data = response.json()
         if 'reference' in data['message']:
             citations = data['message']['reference']
-            return citations
+            dois = [citation['DOI'] for citation in citations if 'DOI' in citation]
+            return dois
         else:
             return []
     else:
