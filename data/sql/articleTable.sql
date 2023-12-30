@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS article
     title                   TEXT,
     publication_date        TEXT,
     doi                     TEXT,
-    journal_id INTEGER REFERENCES journal(journal_id),
-    license_id INTEGER REFERENCES license(license_id)
+    reference_by_count      TEXT,
+    publisher_id    INTEGER REFERENCES publisher(publisher_id),
+    license_id      INTEGER REFERENCES license(license_id)
 );
