@@ -1,0 +1,62 @@
+# top 5 most cited authors in a category
+
+WITH author_citations AS (
+    SELECT au.author_id, au.first_name, au.last_name,
+           SUM(a.citation_count) OVER (PARTITION BY au.author_id) AS total_citations
+    FROM author au
+    JOIN article_authors aa ON au.author_id = aa.author_id
+    JOIN article a ON aa.article_id = a.article_id
+    JOIN article_categories ac ON a.article_id = ac.article_id
+    JOIN categories c ON ac.category_id = c.category_id
+    WHERE c.category_name = 'hep-ph'
+    GROUP BY au.author_id
+)
+SELECT first_name, last_name, total_citations
+FROM author_citations
+ORDER BY total_citations DESC
+LIMIT 5;
+
+
+### Finds the count of articles per publisher along with the average number of categories associated with the articles of each publisher.
+
+SELECT p.publisher_name, 
+       COUNT(ar.article_id) AS article_count, 
+       AVG(category_count) AS avg_category_count
+FROM publisher p
+JOIN article ar ON p.publisher_id = ar.publisher_id
+LEFT JOIN (
+    SELECT article_id, COUNT(category_id) AS category_count
+    FROM article_categories
+    GROUP BY article_id
+) ac ON ar.article_id = ac.article_id
+GROUP BY p.publisher_name;
+
+
+# authors who have all licence types 
+
+SELECT au.first_name, au.last_name
+FROM author au
+JOIN article_authors aa ON au.author_id = aa.author_id
+JOIN article ar ON aa.article_id = ar.article_id
+GROUP BY au.author_id
+HAVING COUNT(DISTINCT ar.license_id) = (SELECT COUNT(DISTINCT license_id) FROM license);
+
+
+###### H-index 
+
+WITH author_articles AS (
+    SELECT au.author_id, au.first_name, au.last_name, a.article_id, a.reference_by_count
+    FROM author au
+    JOIN article_authors aa ON au.author_id = aa.author_id
+    JOIN article a ON aa.article_id = a.article_id
+),
+citation_ranks AS (
+    SELECT author_id, reference_by_count,
+           ROW_NUMBER() OVER (PARTITION BY author_id ORDER BY reference_by_count DESC) AS citation_rank
+    FROM author_articles
+)
+SELECT author_id, first_name, last_name, MAX(citation_rank) AS h_index
+FROM citation_ranks
+WHERE citation_rank <= reference_by_count
+GROUP BY author_id, first_name, last_name
+ORDER BY h_index DESC;
