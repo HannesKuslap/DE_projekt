@@ -158,29 +158,44 @@ def insert_data(**kwargs):
 
                     # Insert into the license table
                     insert_license_query = sql.SQL(
-                        'INSERT INTO license (license_type) VALUES (%s) RETURNING license_id'
+                        'INSERT INTO license (license_type)'
+                        'VALUES (%s) ON CONFLICT (license_type) DO NOTHING RETURNING license_id'
                     )
 
                     # Execute the query and get the license_id
                     cur.execute(insert_license_query, (one_article['license'],))
-                    license_id = cur.fetchone()[0]
+                    license_id = cur.fetchone()[0] if cur.rowcount >0 else None
+
+                    if license_id is None:
+                        # Category already exists, fetch the existing category_id
+                        cur.execute('SELECT license_id FROM categories WHERE license_type = %s', (one_article['license'],))
+                        license_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
                     # Link the article to the license
-                    cur.execute('UPDATE article SET license_id = %s WHERE article_id = %s', (license_id, article_id))
+                    if license_id is not None:
+                        cur.execute('UPDATE article SET license_id = %s WHERE article_id = %s', (license_id, article_id))
+
 
                     # Insert into the categories table
                     for category in one_article['categories'].split(" "):
                         insert_category_query = sql.SQL(
-                            'INSERT INTO categories (category_name) VALUES (%s) RETURNING category_id'
+                            'INSERT INTO categories (category_name)'
+                            'VALUES (%s) ON CONFLICT (category_name) DO NOTHING RETURNING category_id'
                         )
 
                         # Execute the query and get the category_id
                         cur.execute(insert_category_query, (category,))
-                        category_id = cur.fetchone()[0]
+                        category_id = cur.fetchone()[0] if cur.rowcount > 0 else None
+
+                        if category_id is None:
+                            # Category already exists, fetch the existing category_id
+                            cur.execute('SELECT category_id FROM categories WHERE category_name = %s', (category,))
+                            category_id = cur.fetchone()[0] if cur.rowcount > 0 else None
 
                         # Link the article to the category
-                        cur.execute('INSERT INTO article_categories (article_id, category_id) VALUES (%s, %s)',
-                                    (article_id, category_id))
+                        if category_id is not None:
+                            cur.execute('INSERT INTO article_categories (article_id, category_id) VALUES (%s, %s)',
+                                        (article_id, category_id))
 
         # Commit the transaction
         conn.commit()
@@ -345,13 +360,8 @@ sense_file = FileSensor(
     timeout=300
 )
 
-create_bridgeTables = EmptyOperator(
-    task_id="create_bridgeTables",
-    dag=arxiv_data_dag
-)
-
-start >> [create_authorTable, create_journalTable, create_licenseTable, create_categoriesTable] >> create_bridgeTables
-create_bridgeTables >> [create_articleTable, create_articleAuthorTable, create_articleCategoriesTable] >> sense_file
+start >> [create_authorTable, create_journalTable, create_licenseTable, create_categoriesTable] >> create_articleTable
+create_articleTable >> [create_articleAuthorTable, create_articleCategoriesTable] >> sense_file
 
 new_files = PythonOperator(
     task_id="new_files",
