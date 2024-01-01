@@ -1,0 +1,73 @@
+Here are the SQL query commands. Due to the API rate limit we used it to enrich only the first 2000 articles in our data set.
+This means that some queries might look very underwhelming or unreal because of the small data size.
+  
+For each publisher find article counts and the average.
+""""
+SELECT a.title, COUNT(aa.author_id) AS author_count
+FROM article_authors aa
+JOIN article a ON aa.article_id = a.article_id
+GROUP BY a.title
+ORDER BY author_count DESC
+LIMIT 5;
+""""
+
+For each category find the article count.
+""""
+SELECT c.category_name, COUNT(ac.article_id) AS article_count
+FROM article_categories ac
+JOIN categories c ON ac.category_id = c.category_id
+GROUP BY c.category_name
+ORDER BY article_count DESC;
+""""
+
+For each author find the article count.
+""""
+SELECT au.first_name, au.last_name, COUNT(aa.article_id) AS article_count
+FROM article_authors aa
+JOIN author au ON aa.author_id = au.author_id
+GROUP BY au.first_name, au.last_name
+ORDER BY article_count DESC;
+""""
+
+Find the total citations for 5 top authors in each category.
+""""
+SELECT au.first_name, au.last_name, c.category_name, SUM(CAST(a.reference_by_count AS INTEGER)) AS total_citations
+FROM article_authors aa
+JOIN author au ON aa.author_id = au.author_id
+JOIN article_categories ac ON aa.article_id = ac.article_id
+JOIN categories c ON ac.category_id = c.category_id
+JOIN article a ON ac.article_id = a.article_id
+WHERE a.reference_by_count IS NOT NULL
+GROUP BY au.first_name, au.last_name, c.category_name
+ORDER BY total_citations DESC
+LIMIT 100;
+""""
+
+Find total citations for each author and rank them.
+""""
+SELECT au.first_name, au.last_name, SUM(CAST(a.reference_by_count AS INTEGER)) AS total_citations
+FROM article_authors aa
+JOIN author au ON aa.author_id = au.author_id
+JOIN article a ON aa.article_id = a.article_id
+WHERE a.reference_by_count IS NOT NULL
+GROUP BY au.first_name, au.last_name
+ORDER BY total_citations DESC
+LIMIT 100;
+""""
+
+Find the average author count per article.
+""""
+SELECT AVG(author_count) AS avg_authors_per_article
+FROM (SELECT COUNT(author_id) AS author_count FROM article_authors GROUP BY article_id) AS author_counts;
+""""
+
+
+Find top 5 articles that have the most amount of authors.
+""""
+SELECT a.title, COUNT(aa.author_id) AS author_count
+FROM article_authors aa
+JOIN article a ON aa.article_id = a.article_id
+GROUP BY a.title
+ORDER BY author_count DESC
+LIMIT 5;
+""""
